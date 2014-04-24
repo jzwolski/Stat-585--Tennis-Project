@@ -1,0 +1,70 @@
+Stat 585 - Rough Draft
+========================================================
+Justin Zwolski
+========================================================
+
+The sport of tennis was played for the first time between 1859 and 1865. The Association of Tennis Professionals (ATP) was founded in 1972 as a professional group for men's tennis. It is now known as the ATP World Tour, and throughout the calendar year, tennis professionals play in many tournaments around the world. Players can earn points at each tournament, depending on their results. Also, there are certain levels of tournaments, and these different levels correspond to the number of points available. The four Grand Slams, for example, are worth the most points as they are the most important tournaments in the year. There is a ranking system through the ATP World Tour that keeps a record of the points won by the players. This system is continually rolling, as at any specifc day of the year, a player's total points is determined by adding up all the points won from that day a year ago to the present day. The rankings are updated weekly, as many tournaments are played during the year.
+
+I am interested in looking at trends in the rankings, specifically looking at the top 100 players. These trends include height, weight, and age. I chose height and weight because I want to look at the height of the players over the ten years to see if there is a pattern. In today's game, there seems to be many top players who are at least 6'5". It would be interesting to look at age as well. Nowadays there are many top players who are in their early to mid 30's and still are performing at a high level.
+
+Since there is a slight "offseason" in tennis, which is in the month of December, I decided to look at the rankings for the last ten years at the end of each year. The ATP World Tour website shows the weekly rankings dating back to 1973. Since there is a drop-down menu to select the week, I used the following code to create a subset of the rankings, a top 100 list at the end of the year for the last ten years.
+
+```{r}
+library(XML)
+library(plyr)
+url <- "http://www.atpworldtour.com/Rankings/Singles.aspx"
+doc <- htmlParse(url)
+root <- xmlRoot(doc)
+years <- getNodeSet(root, "//option[@value]")
+result <- ldply(years, function(y) xmlAttrs(y)["value"]) [[1]] [c(12,58,105,151,203,255,307,360,412,464)]
+result
+```
+
+Creating a base url and using an ldply statement, the following code shows the newly created dataset that combines the ten different rankings lists.
+
+```{r}
+base <- "http://www.atpworldtour.com/Rankings/Singles.aspx?d="
+urls <- paste0(base, rev(result))
+
+rankings <- ldply(as.list(result), function(y) {
+  result2 <- as.data.frame(readHTMLTable(paste0(base, y)) [[1]])
+  result2$year <- y
+  result2
+})
+head(rankings)
+```
+
+Since the table is not in a user-friendly format, I cleaned the data, and created new columns that would be useful when completing the analysis.
+
+```{r}
+names(rankings)[4] <- "Tourn Played"
+names(rankings)[3] <- "Week Change"
+names(rankings)[2] <- "Points"
+names(rankings)[1] <- "Name"
+
+rankings <- subset(rankings, Points != "Points")
+
+rankings$Name <- gsub('[0-9]{1,}\\r\\n\\t\\t\\t\\t\\t\\t\\t\\t\\r\\n\\t\\t\\t\\t\\t\\t\\t\\t\\t', '',
+                      rankings$Name)
+
+rankings$LastName <- gsub(',.*', '', rankings$Name)
+
+rankings$FirstName <- gsub('.*,', '', rankings$Name)
+rankings$FirstName <- gsub("\\(.*", '', rankings$FirstName)
+rankings$FirstName <- substr(rankings$FirstName, 2, nchar(rankings$FirstName)-1)
+
+rankings$Country <- gsub(".*\\(", '', rankings$Name)
+rankings$Country <- gsub("\\)", '', rankings$Country)
+
+rankings <- rankings[c(-1)]
+
+rankings$PlayerID <- paste(rankings$FirstName, rankings$LastName, sep=", ")
+rankings$PlayerID <- gsub(", ", " ", rankings$PlayerID)
+
+rankings <- rankings[c(8, 6, 5, 7, 4, 1, 2, 3)]
+
+names(rankings)[5] <- "Date"
+
+head(rankings)
+```
+
