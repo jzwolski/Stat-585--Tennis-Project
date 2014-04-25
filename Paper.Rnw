@@ -1,0 +1,288 @@
+\documentclass{article}
+\usepackage{float, hyperref, afterpage}
+\usepackage[margin=1in]{geometry}
+
+\begin{document}
+
+\author{Justin Zwolski}
+\title{STAT 585 Project: Trends in Tennis - A Change in Style?}
+\maketitle
+
+\section*{Introduction}
+
+The sport of tennis was played for the first time between 1859 and 1865. The Association of Tennis Professionals (ATP) was founded in 1972 as a professional group for men's tennis. It is now known as the ATP World Tour, and throughout the calendar year, tennis professionals play in many tournaments around the world. Players can earn points at each tournament, depending on their results. Also, there are certain levels of tournaments, and these different levels correspond to the number of points available. The four Grand Slams, for example, are worth the most points as they are the most important tournaments in the year. There is a ranking system through the ATP World Tour that keeps a record of the points won by the players. This system is continually rolling, as at any specifc day of the year, a player's total points is determined by adding up all the points won from that day a year ago to the present day. The rankings are updated weekly, as many tournaments are played during the year.
+
+We are currently in a Golden Era of tennis, as a few of the current top players can be considered in the discussion of the top tennis players of all time. These players, such as Roger Federer and Rafael Nadal, seem to have been around for a very long time. While Nadal is twenty seven years old and Federer is thirty two, neither of them show many signs of slowing down. Tommy Haas, who is currently ranked fourteenth, is thirty six years old, and has returned to great form over the last couple years. It seems as though players are having continued success at older ages, and that the big age of thirty does not signal an end to a tennis player's career.
+
+Also, the ATP boasts its share of tall players. John Isner and Ivo Karlovic reign supreme in this category, as they stand six feet ten inches and six feet eleven inches tall, respectively. Although there are still many short players on the ATP World Tour, taller players seem to becoming the norm.
+
+Using data from the ATP World Tour website, trends in age, height, and weight will be analyzed to see if there is in fact a change occurring in professional tennis.
+
+\section{Rankings Table}
+
+The first step is to create a table of the top 100 tennis players for each of the past twenty years. Since there is a slight "offseason" in tennis, which is in the month of December, we will look at the rankings at the end of each year. The ATP World Tour website shows the weekly rankings dating back to 1973. Since there is a drop-down menu to select the week, we can use the following code to create a subset of the rankings, a top 100 list at the end of the year for the last twenty years. The variable \texttt{dates} displays the date of the last Monday in December for the last twenty years, using indices based on the drop-down menu on the ATP World Tour Site.
+
+<<libraries, echo=FALSE, message=FALSE>>=
+library(XML)
+library(xtable)
+library(plyr)
+library(stringr)
+library(scrapeR)
+library(ggplot2)
+library(reshape)
+library(lubridate)
+@
+
+<<years, eval=FALSE>>=
+url <- "http://www.atpworldtour.com/Rankings/Singles.aspx"
+doc <- htmlParse(url)
+root <- xmlRoot(doc)
+years <- getNodeSet(root, "//option[@value]")
+dates <- ldply(years, function(y) xmlAttrs(y)["value"]) [[1]] [c(14,60,107,153,205,257,309,362,414,466,518,570,622,675,726,778,830,882,935,987)]                                                                  
+@
+
+A base url must be created to obtain the full website for each rankings list for the last twenty years.
+
+<<baseurl, eval=FALSE>>=
+base <- "http://www.atpworldtour.com/Rankings/Singles.aspx?d="
+@
+
+Using an ldply statement, the top 100 tennis players for each of the last twenty years can be read into R, ordered by year. For example, the top 100 players for 2013 are the first 100 rows of the rankings table, and the top 100 players for 2012 are the next 100 rows of the table.
+
+<<rankings, eval=FALSE>>=
+rankings <- ldply(as.list(dates), function(y) {
+  dates2 <- as.data.frame(readHTMLTable(paste0(base, y)) [[1]])
+  dates2$year <- y
+  dates2
+})
+@
+
+The rankings are now able to be viewed in R, but there are major formatting issues that must be resolved before moving forward. Using regular expressions to remove symbols and spaces and renaming, reordering, and removing columns, a clean data table displaying the top 100 rankings for the last twenty years can be created.
+
+<<Cleaning rankings, eval=FALSE>>=
+names(rankings)[4] <- "Tourn Played"
+names(rankings)[3] <- "Week Change"
+names(rankings)[2] <- "Points"
+names(rankings)[1] <- "Name"
+
+rankings <- subset(rankings, Points != "Points")
+
+rankings$Name <- gsub('[0-9]{1,}\\r\\n\\t\\t\\t\\t\\t\\t\\t\\t\\r\\n\\t\\t\\t\\t\\t\\t\\t\\t\\t','', rankings$Name)
+
+rankings$LastName <- gsub(',.*', '', rankings$Name)
+
+rankings$FirstName <- gsub('.*,', '', rankings$Name)
+rankings$FirstName <- gsub("\\(.*", '', rankings$FirstName)
+rankings$FirstName <- substr(rankings$FirstName, 2, nchar(rankings$FirstName) - 1)
+
+rankings$Country <- gsub(".*\\(", '', rankings$Name)
+rankings$Country <- gsub("\\)", '', rankings$Country)
+
+rankings <- rankings[c(-1)]
+
+rankings$PlayerID <- paste(rankings$FirstName, rankings$LastName, sep=", ")
+rankings$PlayerID <- gsub(", ", " ", rankings$PlayerID)
+
+rankings <- rankings[c(8, 6, 5, 7, 4, 1, 2, 3)]
+
+names(rankings)[5] <- "Date"
+@
+
+\clearpage
+
+\section{Individual Statistics}
+
+The next step is to obtain the individual statistics (height, weight, age) for each of the players in the rankings table. In order to obtain these statistics, we need to access each player's personal page on the ATP World Tour website. This can be done by clicking on the name of player in the rankings list on the website. Therefore, we need to be able to obtain the links to each player in the rankings table. The \texttt{getlinks()} function is created to obtain all the links on each rankings page.
+
+<<getLinks, eval=FALSE, tidy=FALSE>>=
+getLinks = function() { 
+  links = character() 
+  list(a = function(node, ...) { 
+    links <<- c(links, xmlGetAttr(node, "href"))
+    node 
+  }, 
+  links = function()links)
+}
+
+ranklinks <- c("http://www.atpworldtour.com/Rankings/Singles.aspx?d=30.12.2013&r=1&c=#",
+               ......,               
+               "http://www.atpworldtour.com/Rankings/Singles.aspx?d=26.12.1994&r=1&c=#")
+@
+
+Once the \texttt{getLinks()} function is specified and the links to the twenty rankings pages are known, the links to each player can be found by subsetting the full list of links for each website. This is included in the beginning of a loop, which can be run to find the height, weight, and age of each player. The loop begins in the year 2013, and with the \texttt{getLinks()} function, the links to the 100 players are found. A second loop begins inside of the first loop by looking at the first player link, which in this case is Rafael Nadal, since he finished 2013 ranked number one in the world. This inner loop creates a table of the height, weight, and age, as well as other individual information of each player. This table is then stored in a different table, noted as \texttt{fulltable}. The inner loop continues to run for all the top 100 players in 2013. A unique table is created for each player, which is then added to the \texttt{fulltable}. Once the inner loop is completed for all the players in 2013, the \texttt{fulltable} will include all the players with all of their individual information. The outer loop then goes to the year 2012, and information for each player in 2012 is added to the \texttt{fulltable}. The loop continues to run until it has all the player information for the top 100 players in 1994.
+
+<<Loop, eval=FALSE>>=
+stats = NULL
+for (j in 1:20)
+{
+  #Find all links on the rankings page#
+  h1 <- getLinks()
+  htmlTreeParse(file = ranklinks[j],
+                handlers = h1, useInternalNodes = TRUE)
+    
+  #Subset the links to only links for the players#
+  files.1<-h1$links()[str_detect(h1$links(), "/Tennis/Players")]
+    
+  #Add an "a" to remove multiple links for the same player#
+  files.2 <- paste(files.1,"a",sep="")
+  files.3 <- files.2[str_detect(files.2, ".aspxa")]
+  files.4<-str_replace_all(files.3, ".aspxa", ".aspx")
+    
+  #Add the beginning of the url to get the full website address#
+  files <- paste("http://www.atpworldtour.com",files.4,sep="")
+    
+  #Scrape the website for all players in top 100 for each year#
+  df = NULL
+  for (i in 1:100)
+  {
+    url <- files[i]
+    doc <- scrape(url)[[1]]
+    
+    #Specify the path to the table to get the labels of the stats
+    label.1 <-  getNodeSet(doc, path='//*[@id="playerBioInfoList"]/li/span/text()')
+      
+    label.2 <- as.character(sapply(label.1,xmlValue))
+        
+    #Remove the " : "
+    stat.name <- gsub(":","",label.2)
+        
+    #Specify the path to get the values of the stats
+    value.1 <- getNodeSet(doc, path='//*[@id="playerBioInfoList"]/li/text()')
+        
+    value <- as.character(sapply(value.1,xmlValue))
+        
+    #Create a player name column
+    player.name.1 <-  getNodeSet(doc, path='//*[@id="playerBioInfoCardHeader"]/h1/text()')
+        
+    player.name <- as.character(sapply(player.name.1,xmlValue))
+        
+    #Combine the labels and stats for the player
+    table <- data.frame(player.name,stat.name,value,j)
+    
+    if(i == 1){
+      fulltable = table
+    } else {
+      fulltable = rbind(fulltable, table)
+    }
+  }
+  if(j == 1){
+    stats = fulltable
+  } else {
+    stats = rbind(stats, fulltable)
+  }
+}
+@
+
+\clearpage
+
+\section{Combining Rankings and Individual Statistics}
+
+Since the newly created table of individual statistics contains more information than what we need, we must subset the full table of individual statistics.
+
+<<Subset, eval=FALSE>>=
+total.stats <- subset(stats, stats$stat.name=="Height"|
+                      stats$stat.name=="Weight"|
+                      stats$stat.name=="Age")
+
+total.stats$NameYear <- paste(total.stats$player.name, total.stats$j, sep="-")
+
+total.stats <- total.stats[-c(1,4)]
+@
+
+In order to combine the new subsetted table with the rankings table, the subsetted table must be changed so that the height, weight, and age of each combination of player and year are displayed in a single row. The \texttt{reshape} package gives us the ability to transform the table.
+
+<<Reshape, eval=FALSE>>=
+StatTable <- reshape(total.stats, idvar="NameYear", timevar="stat.name", direction="wide")
+
+names(StatTable) <- c("NameYear","Age","Height","Weight")
+@
+
+Since both the rankings table and the statistics table now both contain 2000 rows, one row for each combination of player and year, the two tables can be combined together to create the final table.
+
+<<Merging, eval=FALSE>>=
+TennisData <- cbind(rankings, StatTable)
+
+TennisData <- TennisData[c(-9)]
+@
+
+The rankings and statistics are now combined into one table, but we are still not ready for analysis. The variable height includes a player's height in centimeters, and feet and inches. For analysis purposes, we will remove feet and inches, and convert centimeters to inches to obtain one number for height. The variable weight includes a player's weight in kilograms and pounds. For analysis purposes, we will remove the kilograms, and just keep the number of pounds. The variable age includes a player's current age and their birthday. Since we are interested in their age in a specific year, we will remove current age. In order to find a player's age in a specific year, their birthday can be subtracted from the date of interest. 
+
+<<Fixing variables, eval=FALSE>>=
+#Fixing Height
+TennisData$Height <- as.numeric(substr(gsub(".*\\(", '', as.character(TennisData$Height)), 1, 3))/2.54
+
+#Fixing Weight
+TennisData$Weight <- as.numeric(substr(TennisData$Weight, 2, 4))
+
+#Fixing Date
+TennisData$Date <- as.Date(TennisData$Date, "%d.%m.%Y")
+
+#Fixing Age
+TennisData$Age <- substr(TennisData$Age, 6, 15)
+TennisData$Age <- as.Date(TennisData$Age, "%d.%m.%Y")
+TennisData$Age <- as.numeric(TennisData$Date - TennisData$Age)
+TennisData$Age <- floor(TennisData$Age / 365)
+@
+
+<<TennisData, echo=FALSE>>=
+TennisData <- read.csv("TennisData.csv")
+@
+
+\clearpage
+
+The figure below shows the first and last ten rows of the combination of the rankings and statistics tables.
+ 
+<<Tennistable, echo=F, results='asis'>>=
+xtable(TennisData[1:10,c(1,4,5,6,9,10,11)])
+@
+
+<<Tennistable2, echo=F, results='asis'>>=
+xtable(TennisData[1991:2000,c(1,4,5,6,9,10,11)])
+@
+
+\section{Analysis}
+
+In order to plot trends in height, weight, and age, the average height, weight, and age for each year must be calculated.
+
+<<averages>>=
+TennisData$Date <- as.Date(as.character(TennisData$Date), "%Y-%m-%d")
+
+AvgHeight <- tapply(TennisData$Height, TennisData$Date, mean)
+
+AvgWeight <- tapply(TennisData$Weight, TennisData$Date, mean)
+
+AvgAge <- tapply(TennisData$Age, TennisData$Date, mean, na.rm=T)
+
+Year <- rev(unique(TennisData$Date))
+@
+
+The following plot shows the average height by year. There is a slight dip in the average height from 1994 to 2001. From 2002 to 2013, there is a definite increasing trend in the average height. From 1994 to 2013, the average height has increased by over an inch. This is a quite significant increase, and shows that many of the top tennis players in the world are getting taller. There are advantages to being a tall tennis player, especially while serving. During the serve, a tall player is able to hit more down on the ball since the racket is striking the ball at a higher height. This makes the ball bounce higher on the other side of the net, creating difficulties in the return of serve. An important goal in a tennis match is to hold serve. Tall players have an "easier" time accomplishing this goal because their serve is tougher to return.
+
+<<height plot, fig.width=4, fig.height=4, echo=FALSE, fig.align='center'>>=
+qplot(data=NULL, Year, AvgHeight) + geom_smooth(method="loess") + 
+  labs(title = "Average Height By Year") + ylab("Avg Height (in.)")
+@
+
+The following plot shows the average weight by year. There appears to be a slight increasing trend in the average weight. It is interesting to note that the average weight in 1994 is two pounds lower than the next lowest value, which occurred in 2001. After observing the trend in average height, it is not surprising that average weight is also increasing.
+
+<<weight plot, fig.width=4, fig.height=4, echo=FALSE, fig.align='center'>>=
+qplot(data=NULL, Year, AvgWeight) + geom_smooth(method="loess") + 
+  labs(title = "Average Weight By Year") + ylab("Avg Weight (lbs.)")
+@
+
+\clearpage
+
+The following plot shows the average age by year. There is a definite increasing trend in the average age, especially from 2008 to the present. In fact, the average age has increased by almost three years from 1994 to 2013. Conditioning and the improvement in training routines have enabled players to continue to perform at high levels at older ages. It is tougher nowadays for younger players, who have not yet mastered the fundamentals and the mentality aspect of the sport of tennis, to compete with the battle-tested older players, who have superior knowledge of the sport and are just as fit and strong as the younger players. There will always be players who are exceptions to this explanation, but the overall improvement in health and body awareness has allowed players to maintain a high level of play for a longer period of time.
+
+<<age plot, fig.width=4, fig.height=4, echo=FALSE, fig.align='center'>>=
+qplot(data=NULL, Year, AvgAge) + geom_smooth(method="loess") + 
+  labs(title = "Average Age By Year") + ylab("Avg Age")
+@
+
+\section*{Conclusion / Future Work}
+
+According to the plots in the analysis, there seem to be existing trends in tennis. The increasing trend in average height signifies that tennis is becoming a taller sport. The average height of the top 100 tennis players could continue to rise, as more and more emphasis is being placed on the serve. However, being too tall could inhibit movement around the court, which is essential in tennis. The increasing trend in weight is slightly correlated with height, and could continue to rise as well. The increasing trend in average age shows that players are able to play at a high level at older ages. However, the average age of the top 100 tennis players can not continue to increase at the rate it has been in the past few years. The average age may peak around twenty eight years old, which is the age of physical peak, in the next few years. It will be interesting to see the continuing trends of the average height, weight, and age of professional tennis players.
+
+This analysis was completed with only the top male tennis players. Future work could include analyzing trends in women's professional tennis, and compare these trends to men's professional tennis. Another topic of future work could be to determine the optimum build of a tennis player. Height and weight would be factored in to this calculation, as well as other variables such as speed, agility, and strength.
+
+\end{document}
